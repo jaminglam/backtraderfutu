@@ -17,16 +17,26 @@ def runstrat():
     DataFactory = FutuData
     dataname0 = 'HK.00700'
     dataname1 = 'HK.01810'
-    start_time = datetime.now() - timedelta(days=1)
+    start_time = datetime.now() - timedelta(days=18)
     start_time = start_time.strftime('%Y-%m-%d')
 
-    data0 = DataFactory(dataname=dataname0, start_time=start_time, trading_period=KLType.K_5M)
-    logger.info('data0 feed created successfully: {}'.format(data0))
-    data1 = DataFactory(dataname=dataname1, start_time=start_time, trading_period=KLType.K_5M)
-    logger.info('data1 feed created successfully: {}'.format(data1))
+    minutelydata0 = DataFactory(dataname=dataname0, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1)
+    logger.info('data0 feed created successfully: {}'.format(minutelydata0))
+    fiveminutesdata0 = DataFactory(dataname=dataname0, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1)
+    logger.info('data0 feed created successfully: {}'.format(fiveminutesdata0))
 
-    cerebro.adddata(data0, name=dataname0)
-    cerebro.adddata(data1, name=dataname1)
+    minutelydata1 = DataFactory(dataname=dataname1, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1)
+    logger.info('data1 feed created successfully: {}'.format(minutelydata1))
+    fiveminutesdata1 = DataFactory(dataname=dataname1, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1)
+    logger.info('data1 feed created successfully: {}'.format(fiveminutesdata1))
+
+
+    cerebro.adddata(minutelydata0, name=dataname0 + '_1m')
+    # resample 1m data to 5m data
+    cerebro.resampledata(fiveminutesdata0, name=dataname0 + '_5m', timeframe=bt.TimeFrame.Minutes, compression=5)
+    cerebro.adddata(minutelydata1, name=dataname1 + '_1m')
+    # resample 1m data to 5m data
+    cerebro.resampledata(fiveminutesdata1, name=dataname1 + '_5m', timeframe=bt.TimeFrame.Minutes, compression=5)
     cerebro.broker.setcash(50000)
     cerebro.addstrategy(TestStrategy)
     results = cerebro.run()

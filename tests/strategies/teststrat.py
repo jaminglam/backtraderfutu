@@ -1,5 +1,7 @@
 import backtrader as bt
 import logging
+import pytz
+
 
 logger = logging.getLogger()
 
@@ -7,7 +9,7 @@ logger = logging.getLogger()
 class TestStrategy(bt.Strategy):
     def log(self, txt, dt=None):
         dt = dt or self.datas[0].datetime[0]
-        dt = bt.num2date(dt)
+        dt = bt.num2date(dt, tz=pytz.timezone('Asia/Hong_Kong'))
         logger.info('%s, %s' % (dt.isoformat(), txt))
     
     def __init__(self):

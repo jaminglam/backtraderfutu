@@ -1,6 +1,7 @@
 import threading
 import collections
 import time
+import backtrader as bt
 
 from backtraderfutu import futu_util
 from datetime import datetime
@@ -34,17 +35,28 @@ class Streamer():
         return True
 
     def generate_endtime(self):
-        minutes_level_kltypes = [KLType.K_1M, KLType.K_3M, KLType.K_5M, KLType.K_15M, KLType.K_30M, KLType.K_60M]
-        if self.trading_period == KLType.K_DAY:
-            end_time = datetime.now() - timedelta(days=1) 
-            # end_time = datetime.now()
-        elif self.trading_period in minutes_level_kltypes:
-            end_time = datetime.now()
-        else:
-            # TODO
-            end_time = datetime.now()
+        # minutes_level_kltypes = [KLType.K_1M, KLType.K_3M, KLType.K_5M, KLType.K_15M, KLType.K_30M, KLType.K_60M]
+        # if self.trading_period == KLType.K_DAY:
+        #     end_time = datetime.now() - timedelta(days=1) 
+        #     # end_time = datetime.now()
+        # elif self.trading_period in minutes_level_kltypes:
+        #     end_time = datetime.now()
+        # else:
+        #     # TODO
+        #     end_time = datetime.now()
+        end_time = datetime.now()
         end_time = end_time.strftime('%Y-%m-%d')
         return end_time
+
+    def put_histdata(self, data):
+        # need to reverse data make sure with time descending order
+        # reversed_data = data[::-1] 
+        logger.debug('historical_data:')
+        logger.debug(data)
+        logger.info('try to put code %s %s (%d) data in hist queue %s' % (self.dataname, self.trading_period, len(data), self.qhist))
+        for index, row in data.iterrows():
+            subdata = data.iloc[[index]].reset_index()
+            self.qhist.put({'data': subdata})
 
     def stream_history(self, start_time):
         try:
@@ -57,19 +69,25 @@ class Streamer():
                 max_count=1000, ktype=self.trading_period, 
                 autype=AuType.NONE)
             if ret == RET_OK:
-                # need to reverse data make sure with time descending order
-                # reversed_data = data[::-1] 
-                logger.debug('historical_data:')
-                logger.debug(data)
-                for index, row in data.iterrows():
-                    subdata = data.iloc[[index]].reset_index()
-                    self.qhist.put({'data': subdata})
-                self.qhist.put({})
+                self.put_histdata(data)
+                logger.info('put code %s %s data in hist queue %s successfully' % (self.dataname, self.trading_period, self.qhist))
             else:
                 self.qhist.put({'code': ret, 'data': data})
+            while page_req_key != None:
+                ret, data, page_req_key = self.quote_context.request_history_kline(
+                    self.dataname, start=start_time, end=end_time, 
+                    max_count=1000, ktype=self.trading_period, 
+                    autype=AuType.NONE, page_req_key=page_req_key)
+                if ret == RET_OK:
+                    self.put_histdata(data)
+                    logger.info('put code %s %s data in hist queue %s successfully' % (self.dataname, self.trading_period, self.qhist))
+                else:
+                    self.qhist.put({'code': ret, 'data': data})
+                    raise Exception('continuous stream historical data failed')
+            self.qhist.put({})
         except Exception as e:
-            logger.info('stream historical klines failed. msg: %s' % e)
-            logger.info(e)
+            logger.error('stream historical klines failed. msg: %s' % e)
+            logger.error(e)
             self.qhist.put(None)
             return
 
@@ -81,10 +99,7 @@ class Streamer():
             try:
                 time.sleep(self.sleep_sec)
                 logger.debug('quote context %s status after sleep: %s' % (self.quote_context, self.quote_context.status))
-                # TODO it is only a temperary solution by hard coding KLType.K_1M in live data scenario,
-                # handle data interval in FutuData._load which brings more flexibility
-                # for strategy to generate signal if trading period is DAILY data  
-                ret, data = self.quote_context.get_cur_kline(self.dataname, 1, KLType.K_1M, autype=AuType.NONE)
+                ret, data = self.quote_context.get_cur_kline(self.dataname, 1, self.trading_period, autype=AuType.NONE)
                 logger.debug(data)
                 if ret == RET_OK:
                     cur_time = data['time_key'][0]
@@ -125,10 +140,20 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
         ('trading_password', ''),
         ('notifyall', False),
         ('_debug', False),
-        ('trading_period', KLType.K_1M),
         ('reconnect', 3),  # -1 forever, 0 No, > 0 number of retries
         ('timeout', 3.0),  # timeout between reconnections
     )
+
+    _GRANULARITIES = {
+        (bt.TimeFrame.Minutes, 1): KLType.K_1M,
+        (bt.TimeFrame.Minutes, 5): KLType.K_5M,
+        (bt.TimeFrame.Minutes, 15): KLType.K_15M,
+        (bt.TimeFrame.Minutes, 30): KLType.K_30M,
+        (bt.TimeFrame.Minutes, 60): KLType.K_60M,
+        (bt.TimeFrame.Days, 1): KLType.K_DAY,
+        (bt.TimeFrame.Months, 1): KLType.K_MON,
+        (bt.TimeFrame.Years, 1): KLType.K_YEAR
+    }
 
     DataCls = None
     @classmethod
@@ -145,9 +170,7 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
         super(FutuStore, self).__init__()
 
         self.dontreconnect = False  # for non-recoverable connect errors
-        self.trading_period = self.p.trading_period
         self.trading_password = self.p.trading_password
-        logger.info('trading_period: %s' % self.trading_period)
         self._env = None  # reference to cerebro for general notifications
         self.broker = None  # broker instance
         self.datas = list()  # datas that have registered over start
@@ -162,6 +185,8 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
         self._cash = 0.0
         self._value = 0.0
 
+    def get_granularity(self, timeframe, compression):
+        return self._GRANULARITIES.get((timeframe, compression), None)
 
     def start(self, data=None, broker=None):
         # self.reconnect()
@@ -214,47 +239,50 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
             futu_util.close_context()
         return True
 
-    def subscribe_klines(self, dataname):
+    def subscribe_klines(self, dataname, timeframe, compression):
+        granularity = self.get_granularity(timeframe, compression)
         logger.info('try to subscribe %s klines' % dataname)
         logger.info('try to open context, host=%s, port=%s' % (self.p.host, self.p.port))
         self.quote_context, self.trade_context = futu_util.open_context(host=self.p.host, port=self.p.port)
         logger.info('data %s subscribe quote context: %s, trade context: %s' % (dataname, self.quote_context, self.trade_context))
         try:
-            # TODO hardcode subscribe KLType.K_1M is temporary solution for adaption with live data per minutes
             logger.info('current subscription status :{}'.format(self.quote_context.query_subscription()))
-            self.quote_context.subscribe(code_list=[dataname], subtype_list=[SubType.TICKER, SubType.ORDER_BOOK, KLType.K_1M])
+            # self.quote_context.subscribe(code_list=[dataname], subtype_list=[SubType.TICKER, SubType.ORDER_BOOK, KLType.K_1M])
+            self.quote_context.subscribe(code_list=[dataname], subtype_list=[SubType.TICKER, SubType.ORDER_BOOK, granularity])
             logger.info('subscribe successfully! current subscription status: {}'.format(self.quote_context.query_subscription()))
         except Exception as e:
             self._state = self._ST_OVER
             logger.info("subscribe failed. msg: %s" % e)
             return
  
-    def _t_streaming_historical_klines(self, qhist, dataname, start_time):
+    def _t_streaming_historical_klines(self, qhist, dataname, start_time, granularity):
         streamer = Streamer(quote_context=self.quote_context,
-                            dataname=dataname, trading_period=self.trading_period,
+                            dataname=dataname, trading_period=granularity,
                             qhist=qhist)
         streamer.stream_history(start_time=start_time) 
 
-    def streaming_historical_klines(self, dataname, start_time):
+    def streaming_historical_klines(self, dataname, start_time, timeframe, compression):
         q = queue.Queue()
+        granularity = self.get_granularity(timeframe, compression)
         logger.info('create queue %s for stream historical klines' % q)
-        kwargs = {'qhist': q, 'dataname': dataname, 'start_time': start_time}
+        kwargs = {'qhist': q, 'dataname': dataname, 'start_time': start_time, 'granularity': granularity}
         logger.info('kwargs = {}'.format(kwargs))
         t = threading.Thread(target=self._t_streaming_historical_klines, kwargs=kwargs)
         t.daemon = True
         t.start()
         return q
 
-    def _t_streaming_klines(self, q, dataname):
+    def _t_streaming_klines(self, q, dataname, granularity):
         streamer = Streamer(quote_context=self.quote_context, 
-                            dataname=dataname, trading_period=self.trading_period,
+                            dataname=dataname, trading_period=granularity,
                             q=q)
         streamer.stream()
 
-    def streaming_klines(self, dataname):
+    def streaming_klines(self, dataname, timeframe, compression):
+        granularity = self.get_granularity(timeframe, compression)
         q = queue.Queue()
         logger.info('create queue %s for stream klines' % q)
-        kwargs = {'q': q, 'dataname': dataname}
+        kwargs = {'q': q, 'dataname': dataname, 'granularity': granularity}
         logger.info('kwargs = {}'.format(kwargs))
         t = threading.Thread(target=self._t_streaming_klines, kwargs=kwargs)
         t.daemon = True
