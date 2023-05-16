@@ -18,6 +18,7 @@ logger = logging.getLogger()
 
 class Streamer():
     last_time = None
+
     def __init__(self, *args, **kwargs):
         super().__init__()
         self.quote_context = kwargs['quote_context'] 
@@ -25,7 +26,7 @@ class Streamer():
         self.trading_period = kwargs['trading_period']
         self.q = kwargs.get('q', None)
         self.qhist = kwargs.get('qhist', None)
-        self.sleep_sec = 10
+        self.sleep_sec = kwargs.get('sleep_sec', 1)
 
     def connected(self):
         if (not futu_util.trade_context) or (not futu_util.quote_context):
@@ -155,6 +156,17 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
         (bt.TimeFrame.Years, 1): KLType.K_YEAR
     }
 
+    _TMOUTS = {
+        KLType.K_1M: 1,
+        KLType.K_5M: 1,
+        KLType.K_15M: 2,
+        KLType.K_30M: 2,
+        KLType.K_60M: 2,
+        KLType.K_DAY: 10,
+        KLType.K_MON: 10,
+        KLType.K_YEAR: 10
+    }
+
     DataCls = None
     @classmethod
     def getdata(cls, *args, **kwargs):
@@ -185,6 +197,11 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
         self._cash = 0.0
         self._value = 0.0
 
+    # TODO: This is a temp solution and neet to be optimized
+    # function to calculate sleep time for polling live candles
+    def _get_tmout(self, granularity):
+        return self._TMOUTS(granularity)        
+    
     def get_granularity(self, timeframe, compression):
         return self._GRANULARITIES.get((timeframe, compression), None)
 
@@ -272,17 +289,18 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
         t.start()
         return q
 
-    def _t_streaming_klines(self, q, dataname, granularity):
+    def _t_streaming_klines(self, q, dataname, granularity, tmout):
         streamer = Streamer(quote_context=self.quote_context, 
                             dataname=dataname, trading_period=granularity,
-                            q=q)
+                            q=q, sleep_sec=tmout)
         streamer.stream()
 
     def streaming_klines(self, dataname, timeframe, compression):
         granularity = self.get_granularity(timeframe, compression)
+        tmout = self._get_tmout(granularity)
         q = queue.Queue()
         logger.info('create queue %s for stream klines' % q)
-        kwargs = {'q': q, 'dataname': dataname, 'granularity': granularity}
+        kwargs = {'q': q, 'dataname': dataname, 'granularity': granularity, 'tmout': tmout}
         logger.info('kwargs = {}'.format(kwargs))
         t = threading.Thread(target=self._t_streaming_klines, kwargs=kwargs)
         t.daemon = True

@@ -20,14 +20,14 @@ def runstrat():
     start_time = datetime.now() - timedelta(days=18)
     start_time = start_time.strftime('%Y-%m-%d')
 
-    minutelydata0 = DataFactory(dataname=dataname0, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1)
+    minutelydata0 = DataFactory(dataname=dataname0, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1, qcheck=2)
     logger.info('data0 feed created successfully: {}'.format(minutelydata0))
-    fiveminutesdata0 = DataFactory(dataname=dataname0, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1)
+    fiveminutesdata0 = DataFactory(dataname=dataname0, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1, qcheck=2)
     logger.info('data0 feed created successfully: {}'.format(fiveminutesdata0))
 
-    minutelydata1 = DataFactory(dataname=dataname1, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1)
+    minutelydata1 = DataFactory(dataname=dataname1, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1, qcheck=2)
     logger.info('data1 feed created successfully: {}'.format(minutelydata1))
-    fiveminutesdata1 = DataFactory(dataname=dataname1, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1)
+    fiveminutesdata1 = DataFactory(dataname=dataname1, start_time=start_time, timeframe=bt.TimeFrame.Minutes, compression=1, qcheck=2)
     logger.info('data1 feed created successfully: {}'.format(fiveminutesdata1))
 
 
